@@ -1,0 +1,829 @@
+This file is part of MXE.
+See index.html for further information.
+
+Contains ad hoc patches for cross building.
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20Gl=C3=B6ckner?= <daniel-gl@gmx.net>
+Date: Sun, 3 Jan 2016 05:48:59 +0100
+Subject: [PATCH] make configure determine if basetsd.h is needed for ssize_t
+
+The result is hardcoded in ieee1284.h.
+Duplicate logic in detect.h is replaced by including that file.
+
+diff --git a/configure.in b/configure.in
+index 1111111..2222222 100644
+--- a/configure.in
++++ b/configure.in
+@@ -72,7 +72,17 @@ if test $ac_cv_use_python = yes; then
+ AM_PATH_PYTHON
+ fi
+ 
++AC_CHECK_TYPE([ssize_t],,,[#include <sys/types.h>])
++if test $ac_cv_type_ssize_t != yes; then
++	AC_CHECK_TYPE([SSIZE_T],
++		AC_SUBST([SSIZE_T_IN_BASETSD_H], 1),
++		AC_MSG_ERROR([No definition of ssize_t found.]),
++		[#include <basetsd.h>])
++else
++		AC_SUBST([SSIZE_T_IN_BASETSD_H], 0)
++fi
++
+ dnl Checks for library functions.
+ 
+-AC_CONFIG_FILES(Makefile libieee1284.spec)
++AC_CONFIG_FILES([Makefile libieee1284.spec include/ieee1284.h])
+ AC_OUTPUT
+diff --git a/include/ieee1284.h b/include/ieee1284.h
+deleted file mode 100644
+index 1111111..2222222
+--- a/include/ieee1284.h
++++ /dev/null
+@@ -1,284 +0,0 @@
+-/*
+- * libieee1284 - IEEE 1284 library
+- * Copyright (C) 2001, 2002, 2003  Tim Waugh <twaugh@redhat.com>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+- */
+-
+-#ifndef HAVE_IEEE1284_H
+-#define HAVE_IEEE1284_H
+-
+-#include <sys/types.h> /* for size_t */
+-#ifndef _MSC_VER
+-#include <sys/time.h> /* for struct timeval */
+-#else
+-#include <winsock2.h> /* for struct timeval */
+-#endif
+-
+-#if (defined __MINGW32__ || defined _MSC_VER) && !defined OWN_SSIZE_T
+-#include <basetsd.h> /* for SSIZE_T */
+-#define OWN_SSIZE_T
+-typedef SSIZE_T ssize_t;
+-#endif
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-/* Errors.  When a function returns a negative number, it's one of
+- * these errors. */
+-enum E1284 {
+-  E1284_OK                 = 0,   /* Everything went fine */
+-  E1284_NOTIMPL            = -1,  /* Not implemented in libieee1284 */
+-  E1284_NOTAVAIL           = -2,  /* Not available on this system */
+-  E1284_TIMEDOUT           = -3,  /* Operation timed out */
+-  E1284_REJECTED           = -4,  /* IEEE 1284 negotiation rejected */
+-  E1284_NEGFAILED          = -5,  /* Negotiation went wrong */
+-  E1284_NOMEM              = -6,  /* No memory left */
+-  E1284_INIT               = -7,  /* Error initialising port */
+-  E1284_SYS                = -8,  /* Error interfacing system */
+-  E1284_NOID               = -9,  /* No IEEE 1284 ID available */
+-  E1284_INVALIDPORT        = -10  /* Invalid port */
+-};
+-
+-/* A parallel port. */
+-struct parport {
+-  /* An arbitrary name for the port */
+-  const char *name;
+-
+-  /* The base address of the port, if that has any meaning, or zero. */
+-  unsigned long base_addr;
+-
+-  /* The ECR address of the port, if that has any meaning, or zero. */
+-  unsigned long hibase_addr;
+-
+-  /* For internal use only: */
+-  void *priv;
+-
+-  /* The filename associated with this port,
+-   * if that has any meaning, or NULL. */
+-  const char *filename;
+-};
+-
+-/* Some parallel ports. */
+-struct parport_list {
+-  int portc;
+-  struct parport **portv;
+-};
+-
+-/* The first function to be called.  This gives the library a chance
+- * to look around and see what's available, and gives the program a
+- * chance to choose a port to use. */
+-extern int ieee1284_find_ports (struct parport_list *list, int flags);
+-
+-/* The last function to be called.  After calling this, only
+- * ieee1284_find_ports may be used. */
+-extern void ieee1284_free_ports (struct parport_list *list);
+-
+-/*
+- * Retrieving the Device ID of a device on a port.
+- * This is a special operation since there are some shortcuts on some
+- * operating systems (i.e. Linux) that allow us to elide any actual
+- * communications.
+- */
+-
+-enum ieee1284_devid_flags
+-{
+-  F1284_FRESH = (1<<1)  /* Guarantee a fresh Device ID */
+-};
+-
+-extern ssize_t ieee1284_get_deviceid (struct parport *port, int daisy,
+-				      int flags, char *buffer, size_t len);
+-/* daisy is the daisy chain address (0-3), or -1 for normal IEEE 1284. */
+-
+-/*
+- * Sharing hooks
+- */
+-
+-enum ieee1284_open_flags
+-{
+-  F1284_EXCL = (1<<0)  /* Require exclusive access to the port */
+-};
+-enum ieee1284_capabilities
+-{
+-  CAP1284_RAW = (1<<0),  /* Pin-level access */
+-  CAP1284_NIBBLE = (1<<1),
+-  CAP1284_BYTE = (1<<2),
+-  CAP1284_COMPAT = (1<<3),
+-  CAP1284_BECP = (1<<4),
+-  CAP1284_ECP = (1<<5),
+-  CAP1284_ECPRLE = (1<<6),
+-  CAP1284_ECPSWE = (1<<7),
+-  CAP1284_EPP = (1<<8),
+-  CAP1284_EPPSL = (1<<9),
+-  CAP1284_EPPSWE = (1<<10),
+-  CAP1284_IRQ = (1<<11),
+-  CAP1284_DMA = (1<<12)
+-};
+-extern int ieee1284_open (struct parport *port, int flags, int *capabilities);
+-
+-extern int ieee1284_close (struct parport *port);
+-
+-extern int ieee1284_ref (struct parport *port);
+-extern int ieee1284_unref (struct parport *port);
+-
+-extern int ieee1284_claim (struct parport *port);
+-/* Must be called before any function below.  May fail. */
+-
+-extern void ieee1284_release (struct parport *port);
+-
+-/*
+- * Interrupt notification
+- */
+-extern int ieee1284_get_irq_fd (struct parport *port);
+-extern int ieee1284_clear_irq (struct parport *port, unsigned int *count);
+-
+-/*
+- * Raw port access (PC-style port registers but within inversions)
+- * Functions returning int may fail.
+- */
+-
+-extern int ieee1284_read_data (struct parport *port);
+-extern void ieee1284_write_data (struct parport *port, unsigned char dt);
+-extern int ieee1284_wait_data (struct parport *port, unsigned char mask,
+-			       unsigned char val, struct timeval *timeout);
+-extern int ieee1284_data_dir (struct parport *port, int reverse);
+-
+-/* The status pin functions operate in terms of these bits: */
+-enum ieee1284_status_bits
+-{
+-  S1284_NFAULT = 0x08,
+-  S1284_SELECT = 0x10,
+-  S1284_PERROR = 0x20,
+-  S1284_NACK   = 0x40,
+-  S1284_BUSY   = 0x80,
+-  /* To convert those values into PC-style register values, use this: */
+-  S1284_INVERTED = S1284_BUSY
+-};
+-
+-extern int ieee1284_read_status (struct parport *port);
+-
+-/* Wait until those status pins in mask have the values in val.
+- * Return E1284_OK when condition met, E1284_TIMEDOUT on timeout.
+- * timeout may be modified. */
+-extern int ieee1284_wait_status (struct parport *port,
+-                                 unsigned char mask,
+-				 unsigned char val,
+-				 struct timeval *timeout);
+-
+-/* The control pin functions operate in terms of these bits: */
+-enum ieee1284_control_bits
+-{
+-  C1284_NSTROBE   = 0x01,
+-  C1284_NAUTOFD   = 0x02,
+-  C1284_NINIT     = 0x04,
+-  C1284_NSELECTIN = 0x08,
+-  /* To convert those values into PC-style register values, use this: */
+-  C1284_INVERTED = (C1284_NSTROBE|
+-		    C1284_NAUTOFD|
+-		    C1284_NSELECTIN)
+-};
+-
+-extern int ieee1284_read_control (struct parport *port);
+-/* ieee1284_read_control may be unreliable */
+-
+-extern void ieee1284_write_control (struct parport *port, unsigned char ct);
+-/* NOTE: This will not change the direction of the data lines; use
+- * ieee1284_data_dir for that. */
+-
+-extern void ieee1284_frob_control (struct parport *port, unsigned char mask,
+-				   unsigned char val);
+-/* frob is "out ((in & ~mask) ^ val)" */
+-
+-/* This function may or may not be available, depending on PPWCTLONIRQ
+- * availability.  Its operation is:
+- * If operation unavailable, return E1284_NOTAVAIL.  Otherwise:
+- * Set control pins to ct_before.
+- * Wait for nAck interrupt.  If timeout elapses, return E1284_TIMEDOUT.
+- * Otherwise, set control pins to ct_after and return 0.
+- * timeout may be modified. */
+-extern int ieee1284_do_nack_handshake (struct parport *port,
+-				       unsigned char ct_before,
+-				       unsigned char ct_after,
+-				       struct timeval *timeout);
+-
+-/*
+- * IEEE 1284 operations
+- */
+-
+-/* Negotiation/termination */
+-enum ieee1284_modes
+-{
+-  M1284_NIBBLE =  0,
+-  M1284_BYTE   = (1<<0),
+-  M1284_COMPAT = (1<<8),
+-  M1284_BECP   = (1<<9),
+-  M1284_ECP    = (1<<4),
+-  M1284_ECPRLE = ((1<<4) | (1<<5)),
+-  M1284_ECPSWE = (1<<10), /* Software emulated */
+-  M1284_EPP    = (1<<6),
+-  M1284_EPPSL  = (1<<11), /* EPP 1.7 */
+-  M1284_EPPSWE = (1<<12), /* Software emulated */
+-  M1284_FLAG_DEVICEID = (1<<2),
+-  M1284_FLAG_EXT_LINK = (1<<14)  /* Uses bits in 0x7f */
+-};
+-
+-extern int ieee1284_negotiate (struct parport *port, int mode);
+-extern void ieee1284_terminate (struct parport *port);
+-
+-/* ECP direction switching */
+-extern int ieee1284_ecp_fwd_to_rev (struct parport *port);
+-extern int ieee1284_ecp_rev_to_fwd (struct parport *port);
+-
+-/* Block I/O
+- * The return value is the number of bytes successfully transferred,
+- * or an error code (only if no transfer took place). */
+-enum ieee1284_transfer_flags
+-{
+-  F1284_NONBLOCK = (1<<0),	/* Non-blocking semantics */
+-  F1284_SWE = (1<<2),		/* Don't use hardware assistance */
+-  F1284_RLE = (1<<3),		/* Use ECP RLE */
+-  F1284_FASTEPP = (1<<4)	/* Use faster EPP (counts are unreliable) */
+-};
+-extern ssize_t ieee1284_nibble_read (struct parport *port, int flags,
+-				     char *buffer, size_t len);
+-extern ssize_t ieee1284_compat_write (struct parport *port, int flags,
+-				      const char *buffer, size_t len);
+-extern ssize_t ieee1284_byte_read (struct parport *port, int flags,
+-				   char *buffer, size_t len);
+-extern ssize_t ieee1284_epp_read_data (struct parport *port, int flags,
+-				       char *buffer, size_t len);
+-extern ssize_t ieee1284_epp_write_data (struct parport *port, int flags,
+-					const char *buffer, size_t len);
+-extern ssize_t ieee1284_epp_read_addr (struct parport *port, int flags,
+-				       char *buffer, size_t len);
+-extern ssize_t ieee1284_epp_write_addr (struct parport *port, int flags,
+-					const char *buffer, size_t len);
+-extern ssize_t ieee1284_ecp_read_data (struct parport *port, int flags,
+-				       char *buffer, size_t len);
+-extern ssize_t ieee1284_ecp_write_data (struct parport *port, int flags,
+-					const char *buffer, size_t len);
+-extern ssize_t ieee1284_ecp_read_addr (struct parport *port, int flags,
+-				       char *buffer, size_t len);
+-extern ssize_t ieee1284_ecp_write_addr (struct parport *port, int flags,
+-					const char *buffer, size_t len);
+-extern struct timeval *ieee1284_set_timeout (struct parport *port,
+-					     struct timeval *timeout);
+-
+-#ifdef __cplusplus
+-} /* extern "C" */
+-#endif
+-
+-#endif /* HAVE_IEEE1284_H */
+diff --git a/include/ieee1284.h.in b/include/ieee1284.h.in
+new file mode 100644
+index 1111111..2222222
+--- /dev/null
++++ b/include/ieee1284.h.in
+@@ -0,0 +1,284 @@
++/*
++ * libieee1284 - IEEE 1284 library
++ * Copyright (C) 2001, 2002, 2003  Tim Waugh <twaugh@redhat.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef HAVE_IEEE1284_H
++#define HAVE_IEEE1284_H
++
++#include <sys/types.h> /* for size_t */
++#ifndef _MSC_VER
++#include <sys/time.h> /* for struct timeval */
++#else
++#include <winsock2.h> /* for struct timeval */
++#endif
++
++#if @SSIZE_T_IN_BASETSD_H@ && !defined OWN_SSIZE_T
++#include <basetsd.h> /* for SSIZE_T */
++#define OWN_SSIZE_T
++typedef SSIZE_T ssize_t;
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Errors.  When a function returns a negative number, it's one of
++ * these errors. */
++enum E1284 {
++  E1284_OK                 = 0,   /* Everything went fine */
++  E1284_NOTIMPL            = -1,  /* Not implemented in libieee1284 */
++  E1284_NOTAVAIL           = -2,  /* Not available on this system */
++  E1284_TIMEDOUT           = -3,  /* Operation timed out */
++  E1284_REJECTED           = -4,  /* IEEE 1284 negotiation rejected */
++  E1284_NEGFAILED          = -5,  /* Negotiation went wrong */
++  E1284_NOMEM              = -6,  /* No memory left */
++  E1284_INIT               = -7,  /* Error initialising port */
++  E1284_SYS                = -8,  /* Error interfacing system */
++  E1284_NOID               = -9,  /* No IEEE 1284 ID available */
++  E1284_INVALIDPORT        = -10  /* Invalid port */
++};
++
++/* A parallel port. */
++struct parport {
++  /* An arbitrary name for the port */
++  const char *name;
++
++  /* The base address of the port, if that has any meaning, or zero. */
++  unsigned long base_addr;
++
++  /* The ECR address of the port, if that has any meaning, or zero. */
++  unsigned long hibase_addr;
++
++  /* For internal use only: */
++  void *priv;
++
++  /* The filename associated with this port,
++   * if that has any meaning, or NULL. */
++  const char *filename;
++};
++
++/* Some parallel ports. */
++struct parport_list {
++  int portc;
++  struct parport **portv;
++};
++
++/* The first function to be called.  This gives the library a chance
++ * to look around and see what's available, and gives the program a
++ * chance to choose a port to use. */
++extern int ieee1284_find_ports (struct parport_list *list, int flags);
++
++/* The last function to be called.  After calling this, only
++ * ieee1284_find_ports may be used. */
++extern void ieee1284_free_ports (struct parport_list *list);
++
++/*
++ * Retrieving the Device ID of a device on a port.
++ * This is a special operation since there are some shortcuts on some
++ * operating systems (i.e. Linux) that allow us to elide any actual
++ * communications.
++ */
++
++enum ieee1284_devid_flags
++{
++  F1284_FRESH = (1<<1)  /* Guarantee a fresh Device ID */
++};
++
++extern ssize_t ieee1284_get_deviceid (struct parport *port, int daisy,
++				      int flags, char *buffer, size_t len);
++/* daisy is the daisy chain address (0-3), or -1 for normal IEEE 1284. */
++
++/*
++ * Sharing hooks
++ */
++
++enum ieee1284_open_flags
++{
++  F1284_EXCL = (1<<0)  /* Require exclusive access to the port */
++};
++enum ieee1284_capabilities
++{
++  CAP1284_RAW = (1<<0),  /* Pin-level access */
++  CAP1284_NIBBLE = (1<<1),
++  CAP1284_BYTE = (1<<2),
++  CAP1284_COMPAT = (1<<3),
++  CAP1284_BECP = (1<<4),
++  CAP1284_ECP = (1<<5),
++  CAP1284_ECPRLE = (1<<6),
++  CAP1284_ECPSWE = (1<<7),
++  CAP1284_EPP = (1<<8),
++  CAP1284_EPPSL = (1<<9),
++  CAP1284_EPPSWE = (1<<10),
++  CAP1284_IRQ = (1<<11),
++  CAP1284_DMA = (1<<12)
++};
++extern int ieee1284_open (struct parport *port, int flags, int *capabilities);
++
++extern int ieee1284_close (struct parport *port);
++
++extern int ieee1284_ref (struct parport *port);
++extern int ieee1284_unref (struct parport *port);
++
++extern int ieee1284_claim (struct parport *port);
++/* Must be called before any function below.  May fail. */
++
++extern void ieee1284_release (struct parport *port);
++
++/*
++ * Interrupt notification
++ */
++extern int ieee1284_get_irq_fd (struct parport *port);
++extern int ieee1284_clear_irq (struct parport *port, unsigned int *count);
++
++/*
++ * Raw port access (PC-style port registers but within inversions)
++ * Functions returning int may fail.
++ */
++
++extern int ieee1284_read_data (struct parport *port);
++extern void ieee1284_write_data (struct parport *port, unsigned char dt);
++extern int ieee1284_wait_data (struct parport *port, unsigned char mask,
++			       unsigned char val, struct timeval *timeout);
++extern int ieee1284_data_dir (struct parport *port, int reverse);
++
++/* The status pin functions operate in terms of these bits: */
++enum ieee1284_status_bits
++{
++  S1284_NFAULT = 0x08,
++  S1284_SELECT = 0x10,
++  S1284_PERROR = 0x20,
++  S1284_NACK   = 0x40,
++  S1284_BUSY   = 0x80,
++  /* To convert those values into PC-style register values, use this: */
++  S1284_INVERTED = S1284_BUSY
++};
++
++extern int ieee1284_read_status (struct parport *port);
++
++/* Wait until those status pins in mask have the values in val.
++ * Return E1284_OK when condition met, E1284_TIMEDOUT on timeout.
++ * timeout may be modified. */
++extern int ieee1284_wait_status (struct parport *port,
++                                 unsigned char mask,
++				 unsigned char val,
++				 struct timeval *timeout);
++
++/* The control pin functions operate in terms of these bits: */
++enum ieee1284_control_bits
++{
++  C1284_NSTROBE   = 0x01,
++  C1284_NAUTOFD   = 0x02,
++  C1284_NINIT     = 0x04,
++  C1284_NSELECTIN = 0x08,
++  /* To convert those values into PC-style register values, use this: */
++  C1284_INVERTED = (C1284_NSTROBE|
++		    C1284_NAUTOFD|
++		    C1284_NSELECTIN)
++};
++
++extern int ieee1284_read_control (struct parport *port);
++/* ieee1284_read_control may be unreliable */
++
++extern void ieee1284_write_control (struct parport *port, unsigned char ct);
++/* NOTE: This will not change the direction of the data lines; use
++ * ieee1284_data_dir for that. */
++
++extern void ieee1284_frob_control (struct parport *port, unsigned char mask,
++				   unsigned char val);
++/* frob is "out ((in & ~mask) ^ val)" */
++
++/* This function may or may not be available, depending on PPWCTLONIRQ
++ * availability.  Its operation is:
++ * If operation unavailable, return E1284_NOTAVAIL.  Otherwise:
++ * Set control pins to ct_before.
++ * Wait for nAck interrupt.  If timeout elapses, return E1284_TIMEDOUT.
++ * Otherwise, set control pins to ct_after and return 0.
++ * timeout may be modified. */
++extern int ieee1284_do_nack_handshake (struct parport *port,
++				       unsigned char ct_before,
++				       unsigned char ct_after,
++				       struct timeval *timeout);
++
++/*
++ * IEEE 1284 operations
++ */
++
++/* Negotiation/termination */
++enum ieee1284_modes
++{
++  M1284_NIBBLE =  0,
++  M1284_BYTE   = (1<<0),
++  M1284_COMPAT = (1<<8),
++  M1284_BECP   = (1<<9),
++  M1284_ECP    = (1<<4),
++  M1284_ECPRLE = ((1<<4) | (1<<5)),
++  M1284_ECPSWE = (1<<10), /* Software emulated */
++  M1284_EPP    = (1<<6),
++  M1284_EPPSL  = (1<<11), /* EPP 1.7 */
++  M1284_EPPSWE = (1<<12), /* Software emulated */
++  M1284_FLAG_DEVICEID = (1<<2),
++  M1284_FLAG_EXT_LINK = (1<<14)  /* Uses bits in 0x7f */
++};
++
++extern int ieee1284_negotiate (struct parport *port, int mode);
++extern void ieee1284_terminate (struct parport *port);
++
++/* ECP direction switching */
++extern int ieee1284_ecp_fwd_to_rev (struct parport *port);
++extern int ieee1284_ecp_rev_to_fwd (struct parport *port);
++
++/* Block I/O
++ * The return value is the number of bytes successfully transferred,
++ * or an error code (only if no transfer took place). */
++enum ieee1284_transfer_flags
++{
++  F1284_NONBLOCK = (1<<0),	/* Non-blocking semantics */
++  F1284_SWE = (1<<2),		/* Don't use hardware assistance */
++  F1284_RLE = (1<<3),		/* Use ECP RLE */
++  F1284_FASTEPP = (1<<4)	/* Use faster EPP (counts are unreliable) */
++};
++extern ssize_t ieee1284_nibble_read (struct parport *port, int flags,
++				     char *buffer, size_t len);
++extern ssize_t ieee1284_compat_write (struct parport *port, int flags,
++				      const char *buffer, size_t len);
++extern ssize_t ieee1284_byte_read (struct parport *port, int flags,
++				   char *buffer, size_t len);
++extern ssize_t ieee1284_epp_read_data (struct parport *port, int flags,
++				       char *buffer, size_t len);
++extern ssize_t ieee1284_epp_write_data (struct parport *port, int flags,
++					const char *buffer, size_t len);
++extern ssize_t ieee1284_epp_read_addr (struct parport *port, int flags,
++				       char *buffer, size_t len);
++extern ssize_t ieee1284_epp_write_addr (struct parport *port, int flags,
++					const char *buffer, size_t len);
++extern ssize_t ieee1284_ecp_read_data (struct parport *port, int flags,
++				       char *buffer, size_t len);
++extern ssize_t ieee1284_ecp_write_data (struct parport *port, int flags,
++					const char *buffer, size_t len);
++extern ssize_t ieee1284_ecp_read_addr (struct parport *port, int flags,
++				       char *buffer, size_t len);
++extern ssize_t ieee1284_ecp_write_addr (struct parport *port, int flags,
++					const char *buffer, size_t len);
++extern struct timeval *ieee1284_set_timeout (struct parport *port,
++					     struct timeval *timeout);
++
++#ifdef __cplusplus
++} /* extern "C" */
++#endif
++
++#endif /* HAVE_IEEE1284_H */
+diff --git a/src/detect.h b/src/detect.h
+index 1111111..2222222 100644
+--- a/src/detect.h
++++ b/src/detect.h
+@@ -24,18 +24,7 @@
+ #ifndef _DETECT_H_
+ #define _DETECT_H_
+ 
+-#include <stdlib.h>
+-#ifndef _MSC_VER
+-#include <sys/time.h>
+-#else
+-#include <winsock2.h>
+-#endif
+-
+-#if (defined __MINGW32__ || defined _MSC_VER) && !defined OWN_SSIZE_T
+-#include <basetsd.h> /* for SSIZE_T */
+-#define OWN_SSIZE_T
+-typedef SSIZE_T ssize_t;
+-#endif
++#include "ieee1284.h"
+ 
+ struct parport;
+ struct parport_internal;
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20Gl=C3=B6ckner?= <daniel-gl@gmx.net>
+Date: Sun, 20 Sep 2015 19:14:18 +0200
+Subject: [PATCH] persuade libtool build a DLL on windows
+
+
+diff --git a/Makefile.am b/Makefile.am
+index 1111111..2222222 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -8,7 +8,7 @@ libieee1284_la_SOURCES = src/detect.c src/detect.h src/ports.c src/deviceid.c \
+ 	src/par_nt.h src/io.h src/conf.h src/conf.c libieee1284.sym
+ # When rolling a release, remember to adjust the version info.
+ # It's current:release:age.
+-libieee1284_la_LDFLAGS = -version-info 5:2:2 \
++libieee1284_la_LDFLAGS = -version-info 5:2:2 -no-undefined \
+ 	-export-symbols $(top_srcdir)/libieee1284.sym
+ include_HEADERS = include/ieee1284.h
+ INCLUDES = -I$(top_srcdir)/include
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20Gl=C3=B6ckner?= <daniel-gl@gmx.net>
+Date: Sun, 20 Sep 2015 19:15:15 +0200
+Subject: [PATCH] search for windows.h
+
+instead of relying on the __CYGWIN__ macro
+
+diff --git a/configure.in b/configure.in
+index 1111111..2222222 100644
+--- a/configure.in
++++ b/configure.in
+@@ -37,21 +37,16 @@ case "{$host}" in
+         AC_DEFINE(HAVE_SOLARIS,1,enable solaris iop access)
+ 	solaris_io=true
+ ;;
+-*-*-cygwin*)
+-        dnl Strip version number from uname and make sure we're on NT not 9x
+-        case `uname -s | sed 's/-.*$//'` in
+-        CYGWIN_NT*)
+-                AC_CHECK_HEADER(w32api/windows.h, [
+-      	                AC_DEFINE(HAVE_CYGWIN_NT,1,enable w32api access)
+-	        ], AC_MSG_ERROR(You need the cygwin w32api files on NT)) 
+-        ;;
+-        *)
+-      	        AC_DEFINE(HAVE_CYGWIN_9X,1,enable win95 access)
+-        ;;
+-        esac
+-;;
+-*-*-mingw*)
+-dnl        AC_DEFINE(HAVE_CYGWIN_9X,1,enable win95 access)
++*-*-cygwin* | *-*-mingw*)
++	windows_h_found=false
++	AC_CHECK_HEADERS([windows.h] [w32api/windows.h], [
++		windows_h_found=true
++		break
++	])
++	AS_VAR_IF(windows_h_found, [false], [
++		AC_MSG_ERROR(windows.h not found)
++	])
++	AC_DEFINE(HAVE_CYGWIN_9X,1,enable win95 access)
+         AC_DEFINE(HAVE_CYGWIN_NT,1,enable w32api access)
+ ;;
+ *)
+diff --git a/src/access_lpt.c b/src/access_lpt.c
+index 1111111..2222222 100644
+--- a/src/access_lpt.c
++++ b/src/access_lpt.c
+@@ -51,7 +51,7 @@
+ 
+ #ifdef HAVE_CYGWIN_NT
+ 
+-#ifdef __CYGWIN__
++#ifdef HAVE_W32API_WINDOWS_H
+ #include <w32api/windows.h>
+ #else
+ #include <windows.h>
+diff --git a/src/detect.c b/src/detect.c
+index 1111111..2222222 100644
+--- a/src/detect.c
++++ b/src/detect.c
+@@ -50,7 +50,7 @@
+ #include <sys/ddi.h>
+ #include <sys/sunddi.h>
+ #elif defined(HAVE_CYGWIN_NT)
+-#ifdef __CYGWIN__
++#ifdef HAVE_W32API_WINDOWS_H
+ #include <w32api/windows.h>
+ #else
+ #include <windows.h>
+diff --git a/src/ports.c b/src/ports.c
+index 1111111..2222222 100644
+--- a/src/ports.c
++++ b/src/ports.c
+@@ -36,7 +36,7 @@
+ #include "detect.h"
+ 
+ #ifdef HAVE_CYGWIN_NT
+-#ifdef __CYGWIN__
++#ifdef HAVE_W32API_WINDOWS_H
+ #include <w32api/windows.h>
+ #else /* Not cygwin really */
+ /* Don't include windows.h if it isn't necessary. That's why this is here and
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20Gl=C3=B6ckner?= <daniel-gl@gmx.net>
+Date: Sat, 19 Sep 2015 01:39:15 +0200
+Subject: [PATCH] check Windows version before allowing IO access
+
+
+diff --git a/src/detect.c b/src/detect.c
+index 1111111..2222222 100644
+--- a/src/detect.c
++++ b/src/detect.c
+@@ -49,7 +49,7 @@
+ #elif defined(HAVE_SOLARIS)
+ #include <sys/ddi.h>
+ #include <sys/sunddi.h>
+-#elif defined(HAVE_CYGWIN_NT)
++#elif defined(HAVE_CYGWIN_NT) || defined(HAVE_CYGWIN_9X)
+ #ifdef HAVE_W32API_WINDOWS_H
+ #include <w32api/windows.h>
+ #else
+@@ -191,10 +191,12 @@ check_io (void)
+   }
+   debugprintf ("We can't use IOP, nothing will work\n");
+   #elif defined(HAVE_CYGWIN_9X)
+-  /* note: 95 allows apps direct IO access */
+-  debugprintf ("Taking a guess on port availability (win9x)\n");
+-  capabilities |= IO_CAPABLE;
+-  return 1;
++  /* note: Win32s/95/98/ME allows apps direct IO access */
++  if (GetVersion() & (1 << 31)) {
++    debugprintf ("Taking a guess on port availability (win9x)\n");
++    capabilities |= IO_CAPABLE;
++    return 1;
++  }
+   #endif
+ 
+   return 0;
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20Gl=C3=B6ckner?= <daniel-gl@gmx.net>
+Date: Mon, 4 Jan 2016 00:49:41 +0100
+Subject: [PATCH] add pkg-config metadata file
+
+
+diff --git a/Makefile.am b/Makefile.am
+index 1111111..2222222 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -30,6 +30,9 @@ bin_PROGRAMS = libieee1284_test
+ libieee1284_test_SOURCES = tests/test.c
+ libieee1284_test_LDADD = libieee1284.la
+ 
++pkgconfigdir = $(libdir)/pkgconfig
++pkgconfig_DATA = libieee1284.pc
++
+ # Python bindings
+ src_ieee1284module_la_SOURCES = src/ieee1284module.c
+ if PYTHON
+diff --git a/configure.in b/configure.in
+index 1111111..2222222 100644
+--- a/configure.in
++++ b/configure.in
+@@ -79,5 +79,5 @@ fi
+ 
+ dnl Checks for library functions.
+ 
+-AC_CONFIG_FILES([Makefile libieee1284.spec include/ieee1284.h])
++AC_CONFIG_FILES([Makefile libieee1284.spec libieee1284.pc include/ieee1284.h])
+ AC_OUTPUT
+diff --git a/libieee1284.pc.in b/libieee1284.pc.in
+new file mode 100644
+index 1111111..2222222
+--- /dev/null
++++ b/libieee1284.pc.in
+@@ -0,0 +1,11 @@
++prefix=@prefix@
++exec_prefix=@exec_prefix@
++libdir=@libdir@
++includedir=@includedir@
++
++Name: @PACKAGE@
++Version: @VERSION@
++Description: IEEE1284 parallel port library
++URL: http://cyberelk.net/tim/software/libieee1284/
++Libs: -L${libdir} -lieee1284
++Cflags: -I${includedir}
